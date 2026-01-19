@@ -1,0 +1,5 @@
+{
+  "name": "HemoTrack",
+  "description": "Приложение для отслеживания переливаний крови и медицинских анализов.",
+  "requestFramePermissions": []
+}
