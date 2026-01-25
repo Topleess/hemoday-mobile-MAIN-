@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Default to localhost for dev. In prod, this should be configurable.
 // User can replace with their computer's IP if testing on real device.
-const API_URL = 'http://localhost:8000/api/v1';
+const API_URL = 'https://api.hemoday.online/api/v1';
 
 const api = axios.create({
     baseURL: API_URL,
