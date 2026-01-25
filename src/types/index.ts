@@ -1,9 +1,9 @@
-export type ScreenName = 
-  | 'AUTH_LOGIN' 
-  | 'AUTH_REGISTER' 
+export type ScreenName =
+  | 'AUTH_LOGIN'
+  | 'AUTH_REGISTER'
   | 'AUTH_FORGOT'
-  | 'CALENDAR' 
-  | 'DATA' 
+  | 'CALENDAR'
+  | 'DATA'
   | 'PROFILE'
   | 'ADD_TRANSFUSION'
   | 'EDIT_TRANSFUSION'
@@ -15,7 +15,9 @@ export type ScreenName =
   | 'LEGAL_PRIVACY'
   | 'CHANGE_PASSWORD'
   | 'SHARE_DATA'
-  | 'MY_DATA';
+  | 'MY_DATA'
+  | 'ADD_ANALYSIS_TEMPLATE'
+  | 'ONBOARDING';
 
 export interface Transfusion {
   id: string;
@@ -52,6 +54,36 @@ export interface Reminder {
 }
 
 export interface User {
+  id: string;
   email: string;
-  name: string;
+  name?: string;
+  familyId?: string;
+}
+
+// Auth types
+export interface UserLogin {
+  email: string;
+  password: string;
+}
+
+export interface UserRegister {
+  email: string;
+  password: string;
+}
+
+export interface Token {
+  access_token: string;
+  token_type: string;
+  user_id: string;
+  family_id?: string;
+  invite_code?: string;
+}
+
+export interface UserResponse {
+  id: string;
+  email: string;
+  username?: string;
+  family_id?: string;
+  invite_code?: string;
+  created_at?: string;
 }

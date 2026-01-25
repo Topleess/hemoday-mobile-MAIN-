@@ -1,7 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, Droplet, Bell, FlaskConical } from 'lucide-react';
 import { Card, Header } from '../../components';
-import { Transfusion, Reminder, ScreenName } from '../../types';
+import { ScreenName } from '../../types';
+import withObservables from '@nozbe/with-observables';
+import { database } from '../../database';
+import Transfusion from '../../database/models/Transfusion';
+import Reminder from '../../database/models/Reminder';
 
 interface CalendarScreenProps {
     transfusions: Transfusion[];
@@ -10,12 +14,20 @@ interface CalendarScreenProps {
     onEdit: (type: 'transfusion' | 'analysis' | 'reminder', item: any) => void;
 }
 
-const CalendarScreen: React.FC<CalendarScreenProps> = ({ transfusions, reminders, onNavigate, onEdit }) => {
+const CalendarScreenComponent: React.FC<CalendarScreenProps> = ({ transfusions, reminders, onNavigate, onEdit }) => {
     const [currentDate, setCurrentDate] = useState(new Date());
+    const [hideReminders, setHideReminders] = useState(false);
 
     const daysSince = useMemo(() => {
         if (transfusions.length === 0) return 0;
-        const lastTransfusion = new Date(transfusions[0].date); // Assuming sorted
+        // Ascending or Descending? Query default sort or sort here. 
+        // Assuming we want the LATEST transfusion. 
+        // We should probably sort transfusions by date descending to get the last one easily.
+        // Or if the query is sorted. WatermelonDB queries are not sorted by default unless requested.
+        // Let's sort in JS for now or assume query does it? 
+        // JS sort:
+        const sorted = [...transfusions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        const lastTransfusion = new Date(sorted[0].date);
         const diffTime = Math.abs(new Date().getTime() - lastTransfusion.getTime());
         return Math.floor(diffTime / (1000 * 60 * 60 * 24));
     }, [transfusions]);
@@ -60,19 +72,46 @@ const CalendarScreen: React.FC<CalendarScreenProps> = ({ transfusions, reminders
     }, [currentDate]);
 
     const handleDateClick = (date: Date) => {
-        const dateStr = date.toISOString().split('T')[0]; <br />
-        const transfusion = transfusions.find(t => t.date === dateStr);
-        if (transfusion) {
-            onEdit('transfusion', transfusion);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+
+        // Get all transfusions for this date, sorted by creation time (newest first)
+        const transfusionsOnDate = transfusions
+            .filter(t => t.date === dateStr)
+            .sort((a, b) => b.createdAt - a.createdAt);
+
+        if (transfusionsOnDate.length > 0) {
+            // If there are transfusions, edit the most recent one
+            onEdit('transfusion', transfusionsOnDate[0]);
             return;
         }
 
+        // Check for reminders on this date
         const reminder = reminders.find(r => r.date === dateStr);
         if (reminder) {
             onEdit('reminder', reminder);
             return;
         }
+
+        // If no transfusions or reminders, open add transfusion screen
+        // TODO: We need a way to pass the selected date to the add screen
+        // For now, just navigate to add transfusion 
+        onNavigate('ADD_TRANSFUSION');
     };
+
+    const recentTransfusions = useMemo(() => {
+        if (transfusions.length === 0) return [];
+        const sorted = [...transfusions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        return sorted.slice(0, 5).map(t => ({
+            id: t.id,
+            date: new Date(t.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }),
+            hb: t.hbAfter,
+            type: t.component || 'Гемоглобин' // Fallback
+        }));
+    }, [transfusions]);
+
 
     return (
         <div className="pb-24">
@@ -82,12 +121,79 @@ const CalendarScreen: React.FC<CalendarScreenProps> = ({ transfusions, reminders
                 <Card className="flex flex-col items-start py-6 px-5 relative overflow-hidden">
                     <div className="relative z-10">
                         <h3 className="text-lg font-bold text-gray-900 mb-1">Дней с последнего переливания</h3>
-                        <p className="text-sm text-gray-500 mb-4">Последнее: 11 сентября 2025</p>
+                        <p className="text-sm text-gray-500 mb-4">Последнее: {recentTransfusions.length > 0 ? recentTransfusions[0].date : 'Нет данных'}</p>
                         <div className="text-6xl font-bold text-red-500">{daysSince}</div>
                     </div>
                     <Droplet className="absolute -right-6 -bottom-6 text-red-50 opacity-50 w-48 h-48 rotate-12 pointer-events-none" fill="currentColor" />
                 </Card>
             </div>
+
+            {/* Today's Reminders Widget */}
+            {!hideReminders && (() => {
+                // Get today's date in YYYY-MM-DD format
+                const today = new Date();
+                const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+                // Filter reminders for today
+                const todayReminders = reminders.filter(r => r.date === todayStr);
+
+                if (todayReminders.length === 0) return null;
+
+                return (
+                    <div className="px-4 mb-6">
+                        <Card className="p-4 bg-gradient-to-br from-yellow-50 to-orange-50 border border-yellow-200">
+                            <div className="flex items-start justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                    <Bell size={20} className="text-yellow-600" />
+                                    <h3 className="font-bold text-gray-900">Напоминания на сегодня</h3>
+                                </div>
+                                <button
+                                    onClick={() => setHideReminders(true)}
+                                    className="text-gray-400 hover:text-gray-600 text-sm"
+                                >
+                                    Скрыть
+                                </button>
+                            </div>
+                            <div className="space-y-2">
+                                {todayReminders.map(reminder => (
+                                    <button
+                                        key={reminder.id}
+                                        onClick={() => onEdit('reminder', reminder)}
+                                        className="w-full text-left bg-white rounded-lg p-3 hover:bg-yellow-50 transition-colors border border-yellow-100"
+                                    >
+                                        <div className="flex items-start justify-between">
+                                            <div className="flex-1">
+                                                <p className="font-medium text-gray-900">{reminder.title}</p>
+                                                <p className="text-sm text-gray-500 mt-1">{reminder.time}</p>
+                                            </div>
+                                            {reminder.note && (
+                                                <p className="text-xs text-gray-400 ml-2 max-w-[150px] truncate">{reminder.note}</p>
+                                            )}
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        </Card>
+                    </div>
+                );
+            })()}
+
+            {/* Show reminders button when hidden */}
+            {hideReminders && reminders.some(r => {
+                const today = new Date();
+                const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+                return r.date === todayStr;
+            }) && (
+                    <div className="px-4 mb-6">
+                        <button
+                            onClick={() => setHideReminders(false)}
+                            className="w-full py-2 text-sm text-yellow-600 hover:text-yellow-700 font-medium flex items-center justify-center gap-2"
+                        >
+                            <Bell size={16} />
+                            Показать напоминания
+                        </button>
+                    </div>
+                )}
 
             <div className="px-4 mb-6">
                 <Card className="p-4">
@@ -107,7 +213,10 @@ const CalendarScreen: React.FC<CalendarScreenProps> = ({ transfusions, reminders
                         {days.map((date, index) => {
                             if (!date) return <div key={`empty-${index}`} />;
 
-                            const dateStr = date.toISOString().split('T')[0];
+                            const year = date.getFullYear();
+                            const month = String(date.getMonth() + 1).padStart(2, '0');
+                            const day = String(date.getDate()).padStart(2, '0');
+                            const dateStr = `${year}-${month}-${day}`;
                             const hasTransfusion = transfusions.some(t => t.date === dateStr);
                             const hasReminder = reminders.some(r => r.date === dateStr);
                             const isToday = new Date().toDateString() === date.toDateString();
@@ -163,21 +272,46 @@ const CalendarScreen: React.FC<CalendarScreenProps> = ({ transfusions, reminders
                     <h2 className="text-xl font-bold text-gray-900">История переливаний</h2>
                     <button onClick={() => onNavigate('DATA')} className="text-blue-500 text-sm font-medium">Показать все</button>
                 </div>
-                <Card className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50">
-                    <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-500">
-                            <Droplet size={20} fill="currentColor" />
-                        </div>
-                        <div>
-                            <p className="font-bold text-gray-900">11 сентября 2025</p>
-                            <p className="text-sm text-gray-500">Hb: 100 г/л</p>
-                        </div>
+                {recentTransfusions.length > 0 ? (
+                    <div className="space-y-2">
+                        {recentTransfusions.map((item) => (
+                            <Card key={item.id} className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-500">
+                                        <Droplet size={20} fill="currentColor" />
+                                    </div>
+                                    <div>
+                                        <p className="font-bold text-gray-900 capitalize">{item.date}</p>
+                                        <div className="flex gap-2 text-sm text-gray-500">
+                                            <span>{item.type}</span>
+                                            <span>•</span>
+                                            <span>Hb: {item.hb} г/л</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                {/* We can't easily edit from here without loading the full object or passing ID to edit. 
+                                    The original code just showed info. Let's keep it read-only or just info for now 
+                                    since the user just asked to "display" them. 
+                                    However, the original code had a ChevronRight, implying navigation.
+                                    The handleDateClick handles editing. Let's redirect to data screen or edit?
+                                    The onEdit prop requires the item object. 
+                                    We only mapped a subset. 
+                                    Let's just show the list for now as requested.
+                                */}
+                            </Card>
+                        ))}
                     </div>
-                    <ChevronRight className="text-gray-300" />
-                </Card>
+                ) : (
+                    <p className="text-gray-500 text-center py-4">Нет данных</p>
+                )}
             </div>
         </div>
     );
 };
 
-export default CalendarScreen;
+const enhance = withObservables([], () => ({
+    transfusions: database.get<Transfusion>('transfusions').query().observe(), // observe all transfusions
+    reminders: database.get<Reminder>('reminders').query().observe(),
+}));
+
+export default enhance(CalendarScreenComponent);

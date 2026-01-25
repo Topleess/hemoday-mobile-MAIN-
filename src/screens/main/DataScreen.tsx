@@ -1,8 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { Plus, Droplet, FlaskConical, Bell, ChevronRight, Calendar as CalendarIcon, TrendingUp } from 'lucide-react';
-import { Card, Header, Button, HemoglobinChart } from '../../components';
-import { Transfusion, Analysis, Reminder, ScreenName } from '../../types';
-import { MOCK_ANALYSES, MOCK_REMINDERS } from '../../data/mockData';
+import { Card, Header, Button, HemoglobinChart, AnalysisCard, ErrorBoundary, DatePicker } from '../../components';
+import { ScreenName } from '../../types';
+import withObservables from '@nozbe/with-observables';
+import { database } from '../../database';
+import Transfusion from '../../database/models/Transfusion';
+import Analysis from '../../database/models/Analysis';
+import Reminder from '../../database/models/Reminder';
 
 interface DataScreenProps {
     transfusions: Transfusion[];
@@ -10,52 +14,146 @@ interface DataScreenProps {
     reminders: Reminder[];
     onNavigate: (s: ScreenName) => void;
     onEdit: (type: 'transfusion' | 'analysis' | 'reminder', item: any) => void;
+
+    // Lifted state props
+    activeTab: 'transfusions' | 'analyses' | 'reminders' | 'chart';
+    onTabChange: (tab: 'transfusions' | 'analyses' | 'reminders' | 'chart') => void;
 }
 
-const DataScreen: React.FC<DataScreenProps> = ({ transfusions, onNavigate, onEdit }) => {
-    const [activeTab, setActiveTab] = useState<'transfusions' | 'analyses' | 'reminders' | 'chart'>('transfusions');
-    const [chartPeriod, setChartPeriod] = useState<'1M' | '3M' | '6M' | '1Y' | 'ALL'>('6M');
+const DataScreenComponent: React.FC<DataScreenProps> = ({ transfusions, analyses, reminders, onNavigate, onEdit, activeTab, onTabChange }) => {
+    // Chart view state
+    const [showBefore, setShowBefore] = useState(true);
+    const [showAfter, setShowAfter] = useState(true);
+    const [showChelators, setShowChelators] = useState(true);
 
+    // Calculate earliest date for default filter
+    const earliestDate = useMemo(() => {
+        const allDates: string[] = [];
+        transfusions.forEach(t => allDates.push(t.date));
+        analyses.forEach(a => allDates.push(a.date));
+        reminders.forEach(r => allDates.push(r.date));
+
+        if (allDates.length === 0) {
+            const d = new Date();
+            d.setMonth(d.getMonth() - 1);
+            return d.toISOString().split('T')[0];
+        }
+
+        allDates.sort(); // String sort works for YYYY-MM-DD
+        return allDates[0];
+    }, [transfusions.length, analyses.length, reminders.length]); // Optimize dependency to length to avoid deep recalculations on every render, though strictly should be content. 
+    // Actually, passing the arrays is safer and typically fine for these list sizes.
+    // Let's stick to simple deps for correctness first.
+
+    // Date filter state
+    // Initialize once with earliest date to capture everything by default
+    const [startDate, setStartDate] = useState(earliestDate);
+
+    // Only update start date if a NEW record appears that is OLDER than the current start date.
+    // This prevents the filter from jumping if the user is just looking at data, 
+    // but ensures if they add a historical record, it becomes visible.
+    React.useEffect(() => {
+        if (earliestDate < startDate) {
+            setStartDate(earliestDate);
+        }
+    }, [earliestDate]);
+
+    const [endDate, setEndDate] = useState(() => {
+        const d = new Date();
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    });
+
+    const sortItems = <T extends { date: string; createdAt?: number | Date }>(items: T[]) => {
+        return items.sort((a, b) => {
+            // Primary: Date Descending
+            if (a.date > b.date) return -1;
+            if (a.date < b.date) return 1;
+
+            // Secondary: CreatedAt Descending
+            // Normalize createdAt to number
+            const tA = a.createdAt instanceof Date ? a.createdAt.getTime() : (typeof a.createdAt === 'number' ? a.createdAt : 0);
+            const tB = b.createdAt instanceof Date ? b.createdAt.getTime() : (typeof b.createdAt === 'number' ? b.createdAt : 0);
+
+            return tB - tA;
+        });
+    };
+
+    // Filter items based on date range
+    const filteredTransfusions = useMemo(() => {
+        const filtered = transfusions.filter(t => t.date >= startDate && t.date <= endDate);
+        return sortItems([...filtered]);
+    }, [transfusions, startDate, endDate]);
+
+    const filteredAnalyses = useMemo(() => {
+        const filtered = analyses.filter(a => a.date >= startDate && a.date <= endDate);
+        return sortItems([...filtered]);
+    }, [analyses, startDate, endDate]);
+
+    const filteredReminders = useMemo(() => {
+        const filtered = reminders.filter(r => r.date >= startDate && r.date <= endDate);
+        return sortItems([...filtered]);
+    }, [reminders, startDate, endDate]);
+
+    // Filter chart data from transfusions only
     const chartData = useMemo(() => {
-        const points: { date: Date; value: number; type: 'analysis' | 'transfusion_before' | 'transfusion_after' }[] = [];
-        transfusions.forEach(t => {
-            points.push({ date: new Date(t.date), value: t.hbBefore, type: 'transfusion_before' });
-            points.push({ date: new Date(t.date), value: t.hbAfter, type: 'transfusion_after' });
+        const points: { date: Date; value: number; type: 'analysis' | 'transfusion_before' | 'transfusion_after'; hasChelator?: boolean }[] = [];
+        filteredTransfusions.forEach(t => {
+            const hasChelator = !!t.chelator && t.chelator !== 'none';
+            points.push({ date: new Date(t.date), value: t.hbBefore, type: 'transfusion_before', hasChelator });
+            points.push({ date: new Date(t.date), value: t.hbAfter, type: 'transfusion_after', hasChelator });
         });
-        MOCK_ANALYSES.forEach(a => {
-            const hbItem = a.items.find(i => i.name.toLowerCase().includes('гемоглобин'));
-            if (hbItem) {
-                points.push({ date: new Date(a.date), value: parseFloat(hbItem.value), type: 'analysis' });
-            }
-        });
+
+        // Chart needs chronological order (Ascending)
         return points.sort((a, b) => a.date.getTime() - b.date.getTime());
-    }, [transfusions]);
+    }, [filteredTransfusions]);
 
     return (
         <div className="pb-24">
-            {/* Sticky Container for Header and Tabs */}
             <div className="sticky top-0 z-30 bg-[#f3f4f6]/95 backdrop-blur-xl border-b border-gray-200/50">
                 <Header title="Данные" className="!static !bg-transparent !border-none !py-4" />
 
                 <div className="px-4 pb-3">
-                    <div className="flex bg-gray-200/50 p-1 rounded-xl shadow-inner overflow-x-auto no-scrollbar">
+                    <div className="flex bg-gray-200/50 p-1 rounded-xl shadow-inner overflow-x-auto no-scrollbar mb-3 gap-1">
                         {(['transfusions', 'analyses', 'reminders', 'chart'] as const).map((tab) => (
                             <button
                                 key={tab}
-                                onClick={() => setActiveTab(tab)}
-                                className={`flex-1 min-w-[90px] py-2 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${activeTab === tab
-                                        ? 'bg-white text-red-500 shadow-sm'
-                                        : 'text-gray-500 hover:text-gray-900'
+                                onClick={() => onTabChange(tab)}
+                                className={`flex-shrink-0 min-w-[100px] px-3 py-2 text-sm font-medium rounded-lg transition-all whitespace-nowrap ${activeTab === tab
+                                    ? 'bg-white text-red-500 shadow-sm'
+                                    : 'text-gray-500 hover:text-gray-900'
                                     }`}
                             >
                                 {tab === 'transfusions' ? 'Переливания' : tab === 'analyses' ? 'Анализы' : tab === 'reminders' ? 'Напоминания' : 'График'}
                             </button>
                         ))}
                     </div>
+
+                    {/* Date Filters - Show for ALL tabs now */}
+                    <div className="flex items-center gap-2 mb-2">
+                        <div className="flex-1">
+                            <DatePicker
+                                value={startDate}
+                                onChange={setStartDate}
+                            />
+                        </div>
+
+                        <span className="text-gray-300 font-bold text-xl pb-0.5">-</span>
+
+                        <div className="flex-1">
+                            <DatePicker
+                                value={endDate}
+                                onChange={setEndDate}
+                                align="right"
+                            />
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <div className="pt-4">
+            <div className="pt-2">
                 {activeTab === 'chart' && (
                     <div className="px-4 space-y-4">
                         <Card className="p-4">
@@ -69,36 +167,44 @@ const DataScreen: React.FC<DataScreenProps> = ({ transfusions, onNavigate, onEdi
                                 </div>
                             </div>
 
-                            <HemoglobinChart data={chartData} period={chartPeriod} />
-
-                            <div className="mt-6 flex justify-between bg-gray-50 rounded-lg p-1">
-                                {(['1M', '3M', '6M', '1Y', 'ALL'] as const).map(p => (
-                                    <button
-                                        key={p}
-                                        onClick={() => setChartPeriod(p)}
-                                        className={`text-xs py-1.5 px-3 rounded-md font-medium transition-colors ${chartPeriod === p ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'
-                                            }`}
-                                    >
-                                        {p === '1M' ? '1 мес' : p === '3M' ? '3 мес' : p === '6M' ? '6 мес' : p === '1Y' ? '1 год' : 'Все'}
-                                    </button>
-                                ))}
-                            </div>
+                            <HemoglobinChart
+                                data={chartData}
+                                showBefore={showBefore}
+                                showAfter={showAfter}
+                                showChelators={showChelators}
+                            />
                         </Card>
 
-                        <div className="text-xs text-gray-400 text-center px-4">
-                            График строится на основе данных о переливаниях (Hb до/после) и результатов анализов.
+                        {/* Chart Controls - Moved Below */}
+                        <div className="flex flex-wrap gap-2 justify-center mt-2">
+                            <label className="flex items-center gap-2 px-3 py-2 bg-white rounded-xl shadow-sm border border-gray-100 cursor-pointer select-none active:scale-95 transition-transform">
+                                <input
+                                    type="checkbox"
+                                    checked={showBefore}
+                                    onChange={(e) => setShowBefore(e.target.checked)}
+                                    className="w-4 h-4 rounded text-gray-500 focus:ring-gray-500"
+                                />
+                                <span className="text-sm font-medium text-gray-600">Hb До</span>
+                            </label>
+                            <label className="flex items-center gap-2 px-3 py-2 bg-white rounded-xl shadow-sm border border-gray-100 cursor-pointer select-none active:scale-95 transition-transform">
+                                <input
+                                    type="checkbox"
+                                    checked={showAfter}
+                                    onChange={(e) => setShowAfter(e.target.checked)}
+                                    className="w-4 h-4 rounded text-red-500 focus:ring-red-500"
+                                />
+                                <span className="text-sm font-medium text-gray-600">Hb После</span>
+                            </label>
+                            <label className="flex items-center gap-2 px-3 py-2 bg-white rounded-xl shadow-sm border border-gray-100 cursor-pointer select-none active:scale-95 transition-transform">
+                                <input
+                                    type="checkbox"
+                                    checked={showChelators}
+                                    onChange={(e) => setShowChelators(e.target.checked)}
+                                    className="w-4 h-4 rounded text-green-500 focus:ring-green-500"
+                                />
+                                <span className="text-sm font-medium text-gray-600">Хелаторы</span>
+                            </label>
                         </div>
-                    </div>
-                )}
-
-                {activeTab !== 'chart' && (
-                    <div className="px-4 mb-4">
-                        <Card className="flex items-center justify-between py-3 px-4">
-                            <span className="text-sm font-medium text-gray-900">23.04.2020</span>
-                            <span className="text-xs text-gray-400">до</span>
-                            <span className="text-sm font-medium text-gray-900">23.04.2024</span>
-                            <CalendarIcon size={18} className="text-gray-400" />
-                        </Card>
                     </div>
                 )}
 
@@ -116,22 +222,23 @@ const DataScreen: React.FC<DataScreenProps> = ({ transfusions, onNavigate, onEdi
                 )}
 
                 <div className="px-4 space-y-4">
-                    {activeTab === 'transfusions' && transfusions.map((item) => (
+                    {activeTab === 'transfusions' && filteredTransfusions.map((item) => (
                         <Card key={item.id} className="p-5 cursor-pointer hover:bg-gray-50 border border-transparent hover:border-red-100 transition-all" onClick={() => onEdit('transfusion', item)}>
                             <div className="flex items-center gap-3 mb-4">
                                 <Droplet className="text-red-500" fill="currentColor" />
-                                <h3 className="text-lg font-bold text-gray-900">
-                                    {new Date(item.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
-                                </h3>
+                                <div>
+                                    <h3 className="text-lg font-bold text-gray-900 leading-tight">
+                                        {item.component || 'Переливание'}
+                                    </h3>
+                                    <p className="text-sm text-gray-500">
+                                        {new Date(item.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                    </p>
+                                </div>
                             </div>
                             <div className="space-y-2 text-sm">
                                 <div className="flex justify-between">
                                     <span className="text-gray-500">Объём:</span>
                                     <span className="font-medium">{item.volume} мл</span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span className="text-gray-500">Объём/кг:</span>
-                                    <span className="font-medium">{item.volumePerKg.toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-between">
                                     <span className="text-gray-500">Hb до:</span>
@@ -141,54 +248,48 @@ const DataScreen: React.FC<DataScreenProps> = ({ transfusions, onNavigate, onEdi
                                     <span className="text-gray-500">Hb после:</span>
                                     <span className="font-medium">{item.hbAfter} г/л</span>
                                 </div>
-                                <div className="h-px bg-gray-100 my-2"></div>
-                                <div className="flex justify-between">
-                                    <span className="text-gray-500">ΔHb:</span>
-                                    <span className="font-medium text-green-500">+{item.deltaHb} г/л</span>
-                                </div>
-                                {item.chelator && (
-                                    <div className="flex justify-between mt-1">
-                                        <span className="text-purple-500">Хеллатор:</span>
-                                        <span className="font-medium text-purple-600">{item.chelator}</span>
-                                    </div>
-                                )}
                             </div>
                         </Card>
                     ))}
 
-                    {activeTab === 'analyses' && MOCK_ANALYSES.map((item) => (
-                        <Card key={item.id} className="p-5 cursor-pointer hover:bg-gray-50 border border-transparent hover:border-blue-100 transition-all" onClick={() => onEdit('analysis', item)}>
-                            <div className="flex items-center gap-3 mb-4">
-                                <FlaskConical className="text-blue-500" />
-                                <h3 className="text-lg font-bold text-gray-900">
-                                    {new Date(item.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
-                                </h3>
-                            </div>
-                            {item.items.map((sub, idx) => (
-                                <div key={idx} className="flex justify-between py-1 border-b border-gray-100 last:border-0">
-                                    <span className="text-gray-600">{sub.name}</span>
-                                    <span className="font-medium">{sub.value} <span className="text-gray-400 text-xs">{sub.unit}</span></span>
-                                </div>
-                            ))}
-                        </Card>
-                    ))}
-
-                    {activeTab === 'reminders' && MOCK_REMINDERS.map((item) => (
+                    {activeTab === 'reminders' && filteredReminders.map((item) => (
                         <Card key={item.id} className="p-5 cursor-pointer hover:bg-gray-50 border border-transparent hover:border-indigo-100 transition-all" onClick={() => onEdit('reminder', item)}>
                             <div className="flex items-center gap-3 mb-2">
                                 <Bell className="text-indigo-500" />
                                 <h3 className="text-lg font-bold text-gray-900">{item.title}</h3>
                             </div>
-                            <p className="text-gray-500 text-sm mb-2">{item.date} в {item.time}</p>
-                            <div className="flex gap-2">
-                                <span className="bg-indigo-50 text-indigo-600 text-xs px-2 py-1 rounded-md">{item.repeat}</span>
-                            </div>
+                            <p className="text-gray-500 text-sm mb-2">{item.date}</p>
                         </Card>
                     ))}
+                    {activeTab === 'analyses' && filteredAnalyses.map((item) => (
+                        <ErrorBoundary key={item.id} fallback={<div className="p-4 mb-3 bg-red-50 text-red-500 rounded-xl">Ошибка отображения анализа</div>}>
+                            <AnalysisCard
+                                analysis={item}
+                                onEdit={(item) => onEdit('analysis', item)}
+                            />
+                        </ErrorBoundary>
+                    ))}
+
+                    {/* Empty states */}
+                    {activeTab === 'transfusions' && filteredTransfusions.length === 0 && (
+                        <div className="text-center py-10 text-gray-400">Нет данных за выбранный период</div>
+                    )}
+                    {activeTab === 'analyses' && filteredAnalyses.length === 0 && (
+                        <div className="text-center py-10 text-gray-400">Нет данных за выбранный период</div>
+                    )}
+                    {activeTab === 'reminders' && filteredReminders.length === 0 && (
+                        <div className="text-center py-10 text-gray-400">Нет данных за выбранный период</div>
+                    )}
                 </div>
             </div>
-        </div>
+        </div >
     );
 };
 
-export default DataScreen;
+const enhance = withObservables([], () => ({
+    transfusions: database.get<Transfusion>('transfusions').query().observe(),
+    analyses: database.get<Analysis>('analyses').query().observe(),
+    reminders: database.get<Reminder>('reminders').query().observe(),
+}));
+
+export default enhance(DataScreenComponent);

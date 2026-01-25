@@ -1,38 +1,54 @@
 import React, { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { Card, Header, Button, Input, DropdownSelect, DatePicker } from '../../components';
-import { Analysis } from '../../types';
+import { database } from '../../database';
+import { Q } from '@nozbe/watermelondb';
+import Analysis from '../../database/models/Analysis';
+import AnalysisItem from '../../database/models/AnalysisItem';
+import AnalysisTemplate from '../../database/models/AnalysisTemplate';
+import withObservables from '@nozbe/with-observables';
+import { sync } from '../../database/sync';
+import { useNotification } from '../../context/NotificationContext';
 
 interface AddAnalysisScreenProps {
     onClose: () => void;
     initialData?: Analysis;
+    templates: AnalysisTemplate[];
 }
 
-const AddAnalysisScreen: React.FC<AddAnalysisScreenProps> = ({ onClose, initialData }) => {
-    const [template, setTemplate] = useState(initialData ? 'custom' : '');
+const AddAnalysisScreenComponent: React.FC<AddAnalysisScreenProps> = ({ onClose, initialData, templates }) => {
+    const { showAlert, showConfirm } = useNotification();
+    const [selectedTemplateId, setSelectedTemplateId] = useState('');
+    const [name, setName] = useState(initialData?.name || '');
     const [items, setItems] = useState<{ name: string, value: string, unit: string }[]>(
-        initialData ? initialData.items : [{ name: '', value: '', unit: '' }]
+        initialData ? [] : [{ name: '', value: '', unit: '' }]
     );
     const [date, setDate] = useState(initialData?.date || new Date().toISOString().split('T')[0]);
 
     const isEdit = !!initialData;
 
-    const handleTemplateChange = (val: string) => {
-        setTemplate(val);
-        if (val === 'common') {
-            setItems([
-                { name: 'Гемоглобин', value: '', unit: 'г/дл' },
-                { name: 'Ферритин', value: '', unit: 'нг/мл' },
-                { name: 'Тромбоциты', value: '', unit: '10^9/л' }
-            ]);
-        } else if (val === 'biochem') {
-            setItems([
-                { name: 'АЛТ', value: '', unit: 'Ед/л' },
-                { name: 'АСТ', value: '', unit: 'Ед/л' },
-                { name: 'Билирубин', value: '', unit: 'мкмоль/л' }
-            ]);
-        } else if (val === 'new') {
+    React.useEffect(() => {
+        if (initialData) {
+            initialData.items.fetch().then((fetchedItems: AnalysisItem[]) => {
+                setItems(fetchedItems.map(i => ({ name: i.name, value: i.value, unit: i.unit })));
+            });
+        }
+    }, [initialData]);
+
+    const handleTemplateSelect = async (templateId: string) => {
+        setSelectedTemplateId(templateId);
+
+        if (!templateId) {
+            setName('');
             setItems([{ name: '', value: '', unit: '' }]);
+            return;
+        }
+
+        const template = templates.find(t => t.id === templateId);
+        if (template) {
+            setName(template.name);
+            const templateItems = await template.items.fetch();
+            setItems(templateItems.map(ti => ({ name: ti.name, value: '', unit: ti.unit })));
         }
     };
 
@@ -51,33 +67,110 @@ const AddAnalysisScreen: React.FC<AddAnalysisScreenProps> = ({ onClose, initialD
         setItems(newItems);
     };
 
+    const handleSave = async () => {
+        try {
+            await database.write(async () => {
+                let analysis: Analysis;
+
+                if (isEdit && initialData) {
+                    analysis = initialData;
+                    await analysis.update(a => {
+                        a.date = date;
+                        a.name = name;
+                    });
+
+                    const existingItems = await analysis.items.fetch();
+                    const deleteOps = existingItems.map(i => i.prepareDestroyPermanently());
+                    const createOps = items.map(item => database.get<AnalysisItem>('analysis_items').prepareCreate(i => {
+                        i.analysis.set(analysis);
+                        i.name = item.name;
+                        i.value = item.value;
+                        i.unit = item.unit;
+                    }));
+
+                    await database.batch(...deleteOps, ...createOps);
+                } else {
+                    analysis = await database.get<Analysis>('analyses').create(a => {
+                        a.date = date;
+                        a.name = name;
+                    });
+
+                    const createOps = items.map(item => database.get<AnalysisItem>('analysis_items').prepareCreate(i => {
+                        i.analysis.set(analysis);
+                        i.name = item.name;
+                        i.value = item.value;
+                        i.unit = item.unit;
+                    }));
+
+                    await database.batch(...createOps);
+                }
+            });
+            sync().catch(e => console.error('Analysis sync failed', e));
+            onClose();
+        } catch (error) {
+            console.error("Failed to save analysis", error);
+            showAlert('Ошибка', 'Не удалось сохранить анализ.', 'error');
+        }
+    };
+
+    const handleDelete = async () => {
+        if (isEdit && initialData) {
+            showConfirm('Удаление', 'Вы уверены, что хотите удалить эту запись?', async () => {
+                try {
+                    await database.write(async () => {
+                        const itemsToDelete = await initialData.items.fetch();
+                        const deleteOps = itemsToDelete.map(i => i.prepareDestroyPermanently());
+                        deleteOps.push(initialData.prepareDestroyPermanently());
+
+                        await database.batch(...deleteOps);
+                    });
+                    sync().catch(e => console.error('Analysis delete sync failed', e));
+                    onClose();
+                } catch (error) {
+                    console.error("Failed to delete", error);
+                    showAlert('Ошибка', 'Не удалось удалить запись.', 'error');
+                }
+            });
+        }
+    }
+
     return (
         <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col animate-in slide-in-from-bottom duration-300 overflow-y-auto">
             <Header
-                title={isEdit ? "Редактирование" : "Новый анализ"}
+                title={isEdit ? "Редактирование анализа" : "Добавление анализа"}
                 onBack={onClose}
                 rightAction={
-                    <button onClick={onClose} className="text-red-500 font-medium hover:text-red-600">Сохранить</button>
+                    <button onClick={handleSave} className="text-red-500 font-medium hover:text-red-600">Сохранить</button>
                 }
             />
 
             <div className="p-4 space-y-4">
                 <Card>
                     <DatePicker label="Дата" value={date} onChange={setDate} />
-                    <div className="mt-4">
+                </Card>
+
+                {!isEdit && templates.length > 0 && (
+                    <Card>
                         <DropdownSelect
-                            label="Шаблон анализов"
+                            label="Загрузить из шаблона"
                             placeholder="Выберите шаблон"
-                            value={template}
-                            onChange={handleTemplateChange}
+                            value={selectedTemplateId}
+                            onChange={handleTemplateSelect}
                             options={[
-                                { value: 'common', label: 'Общий анализ крови' },
-                                { value: 'biochem', label: 'Биохимия' },
-                                { value: 'new', label: '+ Создать новый шаблон' },
-                                ...(isEdit ? [{ value: 'custom', label: 'Текущие данные' }] : [])
+                                { value: '', label: 'Без шаблона' },
+                                ...templates.map(t => ({ value: t.id, label: t.name }))
                             ]}
                         />
-                    </div>
+                    </Card>
+                )}
+
+                <Card>
+                    <Input
+                        label="Название анализа"
+                        placeholder="Например: Общий анализ крови"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                    />
                 </Card>
 
                 <div className="flex items-center justify-between px-1">
@@ -124,7 +217,7 @@ const AddAnalysisScreen: React.FC<AddAnalysisScreenProps> = ({ onClose, initialD
                 </Button>
 
                 {isEdit && (
-                    <Button variant="danger" fullWidth onClick={onClose} className="mt-2">
+                    <Button variant="danger" fullWidth onClick={handleDelete} className="mt-2">
                         <Trash2 size={20} />
                         Удалить запись
                     </Button>
@@ -135,4 +228,10 @@ const AddAnalysisScreen: React.FC<AddAnalysisScreenProps> = ({ onClose, initialD
     );
 };
 
-export default AddAnalysisScreen;
+const enhance = withObservables([], () => ({
+    templates: database.get<AnalysisTemplate>('analysis_templates')
+        .query()
+        .observe(),
+}));
+
+export default enhance(AddAnalysisScreenComponent);

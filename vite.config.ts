@@ -9,7 +9,16 @@ export default defineConfig(({ mode }) => {
             port: 3000,
             host: '0.0.0.0',
         },
-        plugins: [react()],
+        plugins: [
+            react({
+                babel: {
+                    plugins: [
+                        ['@babel/plugin-proposal-decorators', { legacy: true }],
+                        ['@babel/plugin-proposal-class-properties', { loose: true }],
+                    ],
+                },
+            }),
+        ],
         define: {
             'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
             'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)

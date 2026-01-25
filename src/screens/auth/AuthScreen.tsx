@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Droplet } from 'lucide-react';
 import { Button, Input } from '../../components';
 import { ScreenName } from '../../types';
+import { authService } from '../../services/auth';
+import { useNotification } from '../../context/NotificationContext';
 
 interface AuthScreenProps {
     mode: 'login' | 'register' | 'forgot';
@@ -9,9 +11,54 @@ interface AuthScreenProps {
     onLogin: () => void;
     onSkip: () => void;
     onNavigate?: (screen: ScreenName) => void;
+    onRegister?: () => void;
 }
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ mode, setMode, onLogin, onSkip, onNavigate }) => {
+export const AuthScreen: React.FC<AuthScreenProps> = ({ mode, setMode, onLogin, onSkip, onNavigate, onRegister }) => {
+    const { showAlert, setLoading } = useNotification();
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [loading, setInternalLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    const handleSubmit = async () => {
+        setError(null);
+        setLoading(true);
+        setInternalLoading(true);
+
+        try {
+            if (mode === 'login') {
+                if (!email || !password) throw new Error('Заполните все поля');
+                await authService.login({ email, password });
+                onLogin();
+            } else if (mode === 'register') {
+                if (!email || !password || !confirmPassword) throw new Error('Заполните все поля');
+                if (password !== confirmPassword) throw new Error('Пароли не совпадают');
+                await authService.register({ email, password });
+                if (onRegister) onRegister();
+                else onLogin();
+            } else if (mode === 'forgot') {
+                if (!email) throw new Error('Введите email');
+                await authService.requestPasswordReset(email);
+                showAlert('Сброс пароля', 'Если аккаунт существует, мы отправили письмо для сброса пароля.', 'success');
+                setMode('login');
+            }
+        } catch (err: any) {
+            console.error(err);
+            if (err.response?.data?.detail) {
+                setError(err.response.data.detail);
+            } else if (err.message) {
+                setError(err.message);
+            } else {
+                setError('Произошла ошибка. Проверьте соединение.');
+            }
+        } finally {
+            setLoading(false);
+            setInternalLoading(false);
+        }
+    };
+
     return (
         <div className="flex flex-col min-h-screen p-6 justify-center max-w-md mx-auto bg-gray-50 relative">
             <div className="absolute top-6 right-6 z-10">
@@ -33,10 +80,35 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ mode, setMode, onLogin, 
             </div>
 
             <div className="space-y-2">
-                <Input placeholder="Ваш email" type="email" />
-                {mode !== 'forgot' && <Input placeholder="Пароль" type="password" />}
-                {mode === 'register' && <Input placeholder="Повторите пароль" type="password" />}
+                <Input
+                    placeholder="Ваш email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                />
+                {mode !== 'forgot' && (
+                    <Input
+                        placeholder="Пароль"
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                    />
+                )}
+                {mode === 'register' && (
+                    <Input
+                        placeholder="Повторите пароль"
+                        type="password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                    />
+                )}
             </div>
+
+            {error && (
+                <div className="text-red-500 text-sm text-center mt-2">
+                    {error}
+                </div>
+            )}
 
             {mode === 'login' && (
                 <div className="flex justify-end mb-6 mt-2">
@@ -45,8 +117,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ mode, setMode, onLogin, 
             )}
 
             <div className="mt-6 space-y-4">
-                <Button fullWidth onClick={onLogin}>
-                    {mode === 'login' ? 'Войти' : mode === 'register' ? 'Создать аккаунт' : 'Отправить ссылку'}
+                <Button fullWidth onClick={handleSubmit} disabled={loading}>
+                    {loading ? 'Загрузка...' : (mode === 'login' ? 'Войти' : mode === 'register' ? 'Создать аккаунт' : 'Отправить ссылку')}
                 </Button>
 
                 <div className="text-center">

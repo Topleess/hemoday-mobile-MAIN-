@@ -1,0 +1,23 @@
+src/components/ErrorBoundary.tsx(17,14): error TS2339: Property 'state' does not exist on type 'ErrorBoundary'.
+src/components/ErrorBoundary.tsx(29,18): error TS2339: Property 'state' does not exist on type 'ErrorBoundary'.
+src/components/ErrorBoundary.tsx(30,22): error TS2339: Property 'props' does not exist on type 'ErrorBoundary'.
+src/components/ErrorBoundary.tsx(31,29): error TS2339: Property 'props' does not exist on type 'ErrorBoundary'.
+src/components/ErrorBoundary.tsx(36,70): error TS2339: Property 'state' does not exist on type 'ErrorBoundary'.
+src/components/ErrorBoundary.tsx(41,21): error TS2339: Property 'props' does not exist on type 'ErrorBoundary'.
+src/data/mockData.ts(1,49): error TS2307: Cannot find module './types' or its corresponding type declarations.
+src/database/models/AnalysisTemplate.ts(6,22): error TS2417: Class static side 'typeof AnalysisTemplate' incorrectly extends base class static side 'typeof Model'.
+  Types of property 'associations' are incompatible.
+    Type '{ analysis_template_items: { type: string; foreignKey: string; }; }' is not assignable to type 'Associations'.
+      Property 'analysis_template_items' is incompatible with index signature.
+        Type '{ type: string; foreignKey: string; }' is not assignable to type 'AssociationInfo'.
+          Type '{ type: string; foreignKey: string; }' is not assignable to type 'Readonly<{ type: "has_many"; foreignKey: string; }>'.
+            Types of property 'type' are incompatible.
+              Type 'string' is not assignable to type '"has_many"'.
+src/database/models/AnalysisTemplateItem.ts(4,22): error TS2417: Class static side 'typeof AnalysisTemplateItem' incorrectly extends base class static side 'typeof Model'.
+  Types of property 'associations' are incompatible.
+    Type '{ analysis_templates: { type: string; key: string; }; }' is not assignable to type 'Associations'.
+      Property 'analysis_templates' is incompatible with index signature.
+        Type '{ type: string; key: string; }' is not assignable to type 'AssociationInfo'.
+          Type '{ type: string; key: string; }' is not assignable to type 'Readonly<{ type: "belongs_to"; key: string; }>'.
+            Types of property 'type' are incompatible.
+              Type 'string' is not assignable to type '"belongs_to"'.

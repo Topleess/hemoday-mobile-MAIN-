@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Lock, Mail, CheckCircle2 } from 'lucide-react';
 import { Header, Button, Input } from '../../components';
+import { authService } from '../../services/auth';
 
 interface ChangePasswordScreenProps {
     onBack: () => void;
@@ -10,13 +11,45 @@ interface ChangePasswordScreenProps {
 export const ChangePasswordScreen: React.FC<ChangePasswordScreenProps> = ({ onBack, initialEmail = '' }) => {
     const [email, setEmail] = useState(initialEmail);
     const [sent, setSent] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-    const handleSubmit = () => {
-        // Mock API call
-        setSent(true);
-        setTimeout(() => {
-            onBack();
-        }, 2000);
+    React.useEffect(() => {
+        const loadUserEmail = async () => {
+            if (authService.isAuthenticated() && !initialEmail) {
+                try {
+                    const user = await authService.getMe();
+                    if (user?.email) {
+                        setEmail(user.email);
+                    }
+                } catch (e) {
+                    console.error('Failed to load user email', e);
+                }
+            }
+        };
+        loadUserEmail();
+    }, [initialEmail]);
+
+    const handleSubmit = async () => {
+        if (!email) {
+            setError('Введите email');
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+            setError(null);
+            await authService.requestPasswordReset(email);
+            setSent(true);
+            setTimeout(() => {
+                onBack();
+            }, 3000);
+        } catch (err: any) {
+            console.error('Password reset error:', err);
+            setError('Не удалось отправить запрос. Попробуйте позже.');
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -35,6 +68,11 @@ export const ChangePasswordScreen: React.FC<ChangePasswordScreenProps> = ({ onBa
 
                 {!sent ? (
                     <div className="w-full space-y-4">
+                        {error && (
+                            <div className="bg-red-50 text-red-500 p-3 rounded-lg text-sm text-center">
+                                {error}
+                            </div>
+                        )}
                         <Input
                             placeholder="user@example.com"
                             type="email"
@@ -42,7 +80,7 @@ export const ChangePasswordScreen: React.FC<ChangePasswordScreenProps> = ({ onBa
                             onChange={(e) => setEmail(e.target.value)}
                             rightIcon={<Mail size={20} />}
                         />
-                        <Button fullWidth onClick={handleSubmit}>
+                        <Button fullWidth onClick={handleSubmit} isLoading={isLoading}>
                             Отправить ссылку
                         </Button>
                     </div>
