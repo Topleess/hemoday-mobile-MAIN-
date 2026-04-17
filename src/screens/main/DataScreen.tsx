@@ -13,7 +13,7 @@ interface DataScreenProps {
     analyses: Analysis[];
     reminders: Reminder[];
     onNavigate: (s: ScreenName) => void;
-    onEdit: (type: 'transfusion' | 'analysis' | 'reminder', item: any) => void;
+    onEdit: (type: 'transfusion' | 'analysis' | 'reminder', item: any, date?: string) => void;
 
     // Lifted state props
     activeTab: 'transfusions' | 'analyses' | 'reminders' | 'chart';
@@ -92,9 +92,74 @@ const DataScreenComponent: React.FC<DataScreenProps> = ({ transfusions, analyses
         return sortItems([...filtered]);
     }, [analyses, startDate, endDate]);
 
-    const filteredReminders = useMemo(() => {
-        const filtered = reminders.filter(r => r.date >= startDate && r.date <= endDate);
-        return sortItems([...filtered]);
+    // Generate individual instances for recurring reminders
+    type ReminderInstance = {
+        reminder: Reminder;
+        instanceDate: string;
+    };
+
+    const reminderInstances = useMemo(() => {
+        const instances: ReminderInstance[] = [];
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+
+        for (const r of reminders) {
+            const cancelledSet = new Set(r.cancelledDates ? r.cancelledDates.split(',').map(d => d.trim()) : []);
+
+            if (!r.repeat || r.repeat === 'Никогда') {
+                // Non-recurring: single instance
+                if (r.date >= startDate && r.date <= endDate && !cancelledSet.has(r.date)) {
+                    instances.push({ reminder: r, instanceDate: r.date });
+                }
+                continue;
+            }
+
+            // Recurring: generate instances for each date in range
+            const originDate = new Date(r.date);
+            const repeatEnd = r.repeatEndDate ? new Date(r.repeatEndDate) : null;
+
+            // Iterate through each day in the filter range
+            const cursor = new Date(Math.max(start.getTime(), originDate.getTime()));
+            while (cursor <= end) {
+                const y = cursor.getFullYear();
+                const m = String(cursor.getMonth() + 1).padStart(2, '0');
+                const d = String(cursor.getDate()).padStart(2, '0');
+                const dateStr = `${y}-${m}-${d}`;
+
+                // Check end date
+                if (repeatEnd && cursor > repeatEnd) break;
+
+                // Check cancelled
+                if (!cancelledSet.has(dateStr)) {
+                    let matches = false;
+
+                    if (dateStr === r.date) {
+                        matches = true;
+                    } else if (r.repeat === 'Ежедневно') {
+                        matches = true;
+                    } else if (r.repeat === 'Еженедельно') {
+                        matches = cursor.getDay() === originDate.getDay();
+                    } else if (r.repeat === 'Ежемесячно') {
+                        matches = cursor.getDate() === originDate.getDate();
+                    }
+
+                    if (matches) {
+                        instances.push({ reminder: r, instanceDate: dateStr });
+                    }
+                }
+
+                cursor.setDate(cursor.getDate() + 1);
+            }
+        }
+
+        // Sort by date descending
+        instances.sort((a, b) => {
+            if (a.instanceDate > b.instanceDate) return -1;
+            if (a.instanceDate < b.instanceDate) return 1;
+            return 0;
+        });
+
+        return instances;
     }, [reminders, startDate, endDate]);
 
     // Filter chart data from transfusions only
@@ -111,8 +176,8 @@ const DataScreenComponent: React.FC<DataScreenProps> = ({ transfusions, analyses
     }, [filteredTransfusions]);
 
     return (
-        <div className="pb-24">
-            <div className="sticky top-0 z-30 bg-[#f3f4f6]/95 backdrop-blur-xl border-b border-gray-200/50">
+        <div className="pb-24 md:pb-8">
+            <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-xl border-b border-gray-100/50">
                 <Header title="Данные" className="!static !bg-transparent !border-none !py-4" />
 
                 <div className="px-4 pb-3">
@@ -238,7 +303,7 @@ const DataScreenComponent: React.FC<DataScreenProps> = ({ transfusions, analyses
                             <div className="space-y-2 text-sm">
                                 <div className="flex justify-between">
                                     <span className="text-gray-500">Объём:</span>
-                                    <span className="font-medium">{item.volume} мл</span>
+                                    <span className="font-medium">{item.volume} мл <span className="text-gray-400">({item.volumePerKg?.toFixed(1)} мл/кг)</span></span>
                                 </div>
                                 <div className="flex justify-between">
                                     <span className="text-gray-500">Hb до:</span>
@@ -246,21 +311,56 @@ const DataScreenComponent: React.FC<DataScreenProps> = ({ transfusions, analyses
                                 </div>
                                 <div className="flex justify-between">
                                     <span className="text-gray-500">Hb после:</span>
-                                    <span className="font-medium">{item.hbAfter} г/л</span>
+                                    <span className="font-medium">{item.hbAfter} г/л <span className="text-gray-400">(Δ {item.deltaHb > 0 ? '+' : ''}{item.deltaHb})</span></span>
                                 </div>
+                                {item.chelator && item.chelator !== 'none' && (
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-500">Хелатор:</span>
+                                        <span className="font-medium">{item.chelator}{item.chelatorDosage ? ` · ${item.chelatorDosage} мг` : ''}</span>
+                                    </div>
+                                )}
+                                {item.note && (
+                                    <div className="pt-2 border-t border-gray-100">
+                                        <p className="text-gray-500 text-xs line-clamp-2">{item.note}</p>
+                                    </div>
+                                )}
                             </div>
                         </Card>
                     ))}
 
-                    {activeTab === 'reminders' && filteredReminders.map((item) => (
-                        <Card key={item.id} className="p-5 cursor-pointer hover:bg-gray-50 border border-transparent hover:border-indigo-100 transition-all" onClick={() => onEdit('reminder', item)}>
-                            <div className="flex items-center gap-3 mb-2">
-                                <Bell className="text-indigo-500" />
-                                <h3 className="text-lg font-bold text-gray-900">{item.title}</h3>
-                            </div>
-                            <p className="text-gray-500 text-sm mb-2">{item.date}</p>
-                        </Card>
-                    ))}
+                    {activeTab === 'reminders' && reminderInstances.map(({ reminder: item, instanceDate }, idx) => {
+                        const isToday = instanceDate === new Date().toISOString().split('T')[0];
+                        const isPast = instanceDate < new Date().toISOString().split('T')[0];
+
+                        return (
+                            <Card
+                                key={`${item.id}-${instanceDate}`}
+                                className={`p-5 cursor-pointer hover:bg-gray-50 border border-transparent hover:border-indigo-100 transition-all ${isPast ? 'opacity-60' : ''}`}
+                                onClick={() => onEdit('reminder', item, instanceDate)}
+                            >
+                                <div className="flex items-center gap-3 mb-2">
+                                    <Bell className={isToday ? 'text-red-500' : 'text-indigo-500'} />
+                                    <div className="flex-1">
+                                        <h3 className={`text-lg font-bold ${item.title ? 'text-gray-900' : 'text-gray-400 italic'}`}>
+                                            {item.title || 'Напоминание'}
+                                        </h3>
+                                        <div className="flex items-center gap-2 mt-0.5">
+                                            <p className="text-gray-500 text-sm">
+                                                {new Date(instanceDate).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                                {item.time ? ` · ${item.time}` : ''}
+                                            </p>
+                                            {item.repeat && item.repeat !== 'Никогда' && (
+                                                <span className="text-xs bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-full">{item.repeat}</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                {item.note && (
+                                    <p className="text-gray-400 text-sm ml-9 line-clamp-2">{item.note}</p>
+                                )}
+                            </Card>
+                        );
+                    })}
                     {activeTab === 'analyses' && filteredAnalyses.map((item) => (
                         <ErrorBoundary key={item.id} fallback={<div className="p-4 mb-3 bg-red-50 text-red-500 rounded-xl">Ошибка отображения анализа</div>}>
                             <AnalysisCard
@@ -277,7 +377,7 @@ const DataScreenComponent: React.FC<DataScreenProps> = ({ transfusions, analyses
                     {activeTab === 'analyses' && filteredAnalyses.length === 0 && (
                         <div className="text-center py-10 text-gray-400">Нет данных за выбранный период</div>
                     )}
-                    {activeTab === 'reminders' && filteredReminders.length === 0 && (
+                    {activeTab === 'reminders' && reminderInstances.length === 0 && (
                         <div className="text-center py-10 text-gray-400">Нет данных за выбранный период</div>
                     )}
                 </div>

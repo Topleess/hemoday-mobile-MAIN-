@@ -13,6 +13,9 @@ export default class Transfusion extends Model {
     @field('delta_hb') deltaHb!: number
     @text('component') component?: string
     @text('chelator') chelator?: string
+    @field('ferritin') ferritin?: number
+    @field('chelator_dosage') chelatorDosage?: number
+    @text('note') note?: string
     @readonly @date('created_at') createdAt!: number
     @readonly @date('updated_at') updatedAt!: number
 }

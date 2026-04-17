@@ -113,7 +113,7 @@ const AddAnalysisTemplateScreen: React.FC<AddAnalysisTemplateScreenProps> = ({ o
     };
 
     return (
-        <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col animate-in slide-in-from-bottom duration-300 overflow-y-auto">
+        <div className="fixed inset-0 bg-white z-50 flex flex-col animate-in slide-in-from-bottom duration-300 overflow-y-auto">
             <Header
                 title={isEdit ? "Редактирование шаблона" : "Создание шаблона"}
                 onBack={onClose}

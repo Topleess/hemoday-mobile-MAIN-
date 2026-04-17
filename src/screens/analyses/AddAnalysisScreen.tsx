@@ -13,17 +13,21 @@ import { useNotification } from '../../context/NotificationContext';
 interface AddAnalysisScreenProps {
     onClose: () => void;
     initialData?: Analysis;
+    preselectedDate?: string | null;
     templates: AnalysisTemplate[];
 }
 
-const AddAnalysisScreenComponent: React.FC<AddAnalysisScreenProps> = ({ onClose, initialData, templates }) => {
+const AddAnalysisScreenComponent: React.FC<AddAnalysisScreenProps> = ({ onClose, initialData, preselectedDate, templates }) => {
     const { showAlert, showConfirm } = useNotification();
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
     const [name, setName] = useState(initialData?.name || '');
     const [items, setItems] = useState<{ name: string, value: string, unit: string }[]>(
         initialData ? [] : [{ name: '', value: '', unit: '' }]
     );
-    const [date, setDate] = useState(initialData?.date || new Date().toISOString().split('T')[0]);
+    const [date, setDate] = useState(initialData?.date || preselectedDate || (() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    })());
 
     const isEdit = !!initialData;
 
@@ -135,7 +139,7 @@ const AddAnalysisScreenComponent: React.FC<AddAnalysisScreenProps> = ({ onClose,
     }
 
     return (
-        <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col animate-in slide-in-from-bottom duration-300 overflow-y-auto">
+        <div className="fixed inset-0 bg-white z-50 flex flex-col animate-in slide-in-from-bottom duration-300 overflow-y-auto">
             <Header
                 title={isEdit ? "Редактирование анализа" : "Добавление анализа"}
                 onBack={onClose}

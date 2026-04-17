@@ -14,6 +14,8 @@ interface DatePickerProps {
 
 export const DatePicker: React.FC<DatePickerProps> = ({ label, value, onChange, className = '', allowFuture = false, compact = false, minimal = false, align = 'left' }) => {
     const [isOpen, setIsOpen] = useState(false);
+    const [manualInput, setManualInput] = useState('');
+    const [manualError, setManualError] = useState('');
     const [currentMonth, setCurrentMonth] = useState(() => {
         const now = new Date();
         const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -21,6 +23,33 @@ export const DatePicker: React.FC<DatePickerProps> = ({ label, value, onChange, 
         return new Date(dateValue);
     });
     const containerRef = useRef<HTMLDivElement>(null);
+
+    const parseManualDate = (input: string): string | null => {
+        const cleaned = input.replace(/[\/\-]/g, '.');
+        const match = cleaned.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+        if (!match) return null;
+        const day = parseInt(match[1], 10);
+        const month = parseInt(match[2], 10);
+        const year = parseInt(match[3], 10);
+        if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1900 || year > 2100) return null;
+        const testDate = new Date(year, month - 1, day);
+        if (testDate.getDate() !== day || testDate.getMonth() !== month - 1) return null;
+        if (!allowFuture && testDate > new Date()) return null;
+        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    };
+
+    const handleManualSubmit = () => {
+        const parsed = parseManualDate(manualInput);
+        if (parsed) {
+            onChange(parsed);
+            setCurrentMonth(new Date(parsed));
+            setManualInput('');
+            setManualError('');
+            setIsOpen(false);
+        } else {
+            setManualError('Неверный формат. Используйте ДД.ММ.ГГГГ');
+        }
+    };
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -141,6 +170,25 @@ export const DatePicker: React.FC<DatePickerProps> = ({ label, value, onChange, 
 
             {isOpen && (
                 <div className={`absolute top-full mt-2 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 p-4 animate-in fade-in zoom-in-95 duration-200 origin-top min-w-[300px] ${align === 'right' ? 'right-0' : 'left-0'}`}>
+                    <div className="flex gap-2 mb-3">
+                        <input
+                            type="text"
+                            placeholder="ДД.ММ.ГГГГ"
+                            value={manualInput}
+                            onChange={(e) => { setManualInput(e.target.value); setManualError(''); }}
+                            onKeyDown={(e) => e.key === 'Enter' && handleManualSubmit()}
+                            className="flex-1 bg-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200"
+                        />
+                        <button
+                            type="button"
+                            onClick={handleManualSubmit}
+                            className="px-3 py-2 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors"
+                        >
+                            OK
+                        </button>
+                    </div>
+                    {manualError && <p className="text-xs text-red-500 mb-2">{manualError}</p>}
+
                     <div className="flex items-center justify-between mb-4">
                         <button
                             type="button"

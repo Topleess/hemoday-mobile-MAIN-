@@ -53,7 +53,7 @@ export const ChangePasswordScreen: React.FC<ChangePasswordScreenProps> = ({ onBa
     };
 
     return (
-        <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col animate-in slide-in-from-right duration-300">
+        <div className="fixed inset-0 bg-white z-50 flex flex-col animate-in slide-in-from-right duration-300">
             <Header title="Смена пароля" onBack={onBack} />
 
             <div className="p-6 flex flex-col items-center pt-20">

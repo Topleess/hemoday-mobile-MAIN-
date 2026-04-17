@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "418020787330",
+    "project_id": "hemoday",
+    "storage_bucket": "hemoday.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:418020787330:android:1e4ca2639f214b8945a09b",
+        "android_client_info": {
+          "package_name": "com.hemoday.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAhYakhBH7PNJwHAqwHifErO-ApAabVzTM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

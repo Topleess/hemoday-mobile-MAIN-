@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.\\(md|txt|json\\)$\")",
+      "Bash(find \"C:\\\\\\\\Users\\\\\\\\alex2\\\\\\\\Desktop\\\\\\\\Projecta\\\\\\\\hemoday-mobile-MAIN-\\\\\\\\src\" -type f \\\\\\( -name \"*.ts\" -o -name \"*.tsx\" \\\\\\))",
+      "Bash(git log:*)",
+      "Bash(xargs grep:*)"
+    ]
+  }
+}

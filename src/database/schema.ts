@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb'
 
 export const mySchema = appSchema({
-    version: 7,
+    version: 10,
     tables: [
         tableSchema({
             name: 'transfusions',
@@ -15,6 +15,9 @@ export const mySchema = appSchema({
                 { name: 'hb_after', type: 'number' },
                 { name: 'delta_hb', type: 'number' },
                 { name: 'chelator', type: 'string', isOptional: true },
+                { name: 'ferritin', type: 'number', isOptional: true },
+                { name: 'chelator_dosage', type: 'number', isOptional: true },
+                { name: 'note', type: 'string', isOptional: true },
                 { name: 'created_at', type: 'number' },
                 { name: 'updated_at', type: 'number' },
             ]
@@ -48,6 +51,8 @@ export const mySchema = appSchema({
                 { name: 'time', type: 'string' },
                 { name: 'repeat', type: 'string' },
                 { name: 'note', type: 'string', isOptional: true },
+                { name: 'repeat_end_date', type: 'string', isOptional: true },
+                { name: 'cancelled_dates', type: 'string', isOptional: true },
                 { name: 'created_at', type: 'number' },
                 { name: 'updated_at', type: 'number' },
             ]

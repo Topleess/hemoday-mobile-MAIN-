@@ -13,11 +13,12 @@ import { useNotification } from '../../context/NotificationContext';
 interface AddTransfusionScreenProps {
     onClose: () => void;
     initialData?: Transfusion;
+    preselectedDate?: string | null;
     componentTypes: ComponentType[];
     chelatorTypes: ChelatorType[];
 }
 
-const AddTransfusionScreenComponent: React.FC<AddTransfusionScreenProps> = ({ onClose, initialData, componentTypes, chelatorTypes }) => {
+const AddTransfusionScreenComponent: React.FC<AddTransfusionScreenProps> = ({ onClose, initialData, preselectedDate, componentTypes, chelatorTypes }) => {
     const { showToast, showConfirm, showAlert } = useNotification();
 
     // Inverse mapping for editing: map stored component string back to internal 'indicator' value if possible
@@ -38,19 +39,20 @@ const AddTransfusionScreenComponent: React.FC<AddTransfusionScreenProps> = ({ on
     const [hbBefore, setHbBefore] = useState(initialData ? initialData.hbBefore.toString() : '85');
     const [hbAfter, setHbAfter] = useState(initialData ? initialData.hbAfter.toString() : '100');
 
-    const [date, setDate] = useState(initialData?.date || (() => {
+    const [date, setDate] = useState(initialData?.date || preselectedDate || (() => {
         const d = new Date();
         const year = d.getFullYear();
         const month = String(d.getMonth() + 1).padStart(2, '0');
         const day = String(d.getDate()).padStart(2, '0');
         return `${year}-${month}-${day}`;
     })());
-    const [note, setNote] = useState('');
+    const [chelatorDosage, setChelatorDosage] = useState(initialData?.chelatorDosage ? initialData.chelatorDosage.toString() : '');
+    const [note, setNote] = useState(initialData?.note || '');
 
     const isEdit = !!initialData;
 
     useEffect(() => {
-        const loadLastWeight = async () => {
+        const loadLastValues = async () => {
             if (!initialData) {
                 try {
                     const transfusions = await database.get<Transfusion>('transfusions')
@@ -64,13 +66,27 @@ const AddTransfusionScreenComponent: React.FC<AddTransfusionScreenProps> = ({ on
                     if (transfusions.length > 0) {
                         setWeight(transfusions[0].weight.toString());
                     }
+
+                    // Load last chelator dosage for the currently selected drug
+                    const withDosage = await database.get<Transfusion>('transfusions')
+                        .query(
+                            Q.where('chelator_dosage', Q.notEq(null)),
+                            Q.sortBy('date', Q.desc),
+                            Q.sortBy('created_at', Q.desc),
+                            Q.take(1)
+                        )
+                        .fetch();
+
+                    if (withDosage.length > 0 && withDosage[0].chelatorDosage) {
+                        setChelatorDosage(withDosage[0].chelatorDosage.toString());
+                    }
                 } catch (error) {
-                    console.error('Failed to load last weight', error);
+                    console.error('Failed to load last values', error);
                 }
             }
         };
 
-        loadLastWeight();
+        loadLastValues();
     }, [initialData]);
 
     const volumePerKg = useMemo(() => {
@@ -111,6 +127,7 @@ const AddTransfusionScreenComponent: React.FC<AddTransfusionScreenProps> = ({ on
         const volKg = vol / w;
         const delta = hbA - hbB;
         const chelatorVal = drug === 'Нет' ? undefined : drug;
+        const chelatorDosageVal = chelatorDosage ? parseFloat(chelatorDosage) : undefined;
 
         try {
             await database.write(async () => {
@@ -125,6 +142,8 @@ const AddTransfusionScreenComponent: React.FC<AddTransfusionScreenProps> = ({ on
                         t.deltaHb = delta;
                         t.chelator = chelatorVal;
                         t.component = indicator;
+                        t.chelatorDosage = chelatorDosageVal;
+                        t.note = note || undefined;
                     });
                 } else {
                     await database.get<Transfusion>('transfusions').create(t => {
@@ -137,6 +156,8 @@ const AddTransfusionScreenComponent: React.FC<AddTransfusionScreenProps> = ({ on
                         t.deltaHb = delta;
                         t.chelator = chelatorVal;
                         t.component = indicator;
+                        t.chelatorDosage = chelatorDosageVal;
+                        t.note = note || undefined;
                     });
                 }
             });
@@ -157,8 +178,8 @@ const AddTransfusionScreenComponent: React.FC<AddTransfusionScreenProps> = ({ on
                 try {
                     await database.write(async () => {
                         await initialData.markAsDeleted();
-                        await initialData.destroyPermanently();
                     });
+                    sync().catch(e => console.error('Delete sync failed', e));
                     onClose();
                 } catch (error) {
                     console.error("Failed to delete transfusion", error);
@@ -169,7 +190,7 @@ const AddTransfusionScreenComponent: React.FC<AddTransfusionScreenProps> = ({ on
     };
 
     return (
-        <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col animate-in slide-in-from-bottom duration-300 overflow-y-auto">
+        <div className="fixed inset-0 bg-white z-50 flex flex-col animate-in slide-in-from-bottom duration-300 overflow-y-auto">
             <Header
                 title={isEdit ? "Редактирование переливания" : "Добавление переливания"}
                 onBack={onClose}
@@ -193,11 +214,19 @@ const AddTransfusionScreenComponent: React.FC<AddTransfusionScreenProps> = ({ on
                         options={componentOptions}
                     />
                     <DropdownSelect
-                        label="Препарат"
+                        label="Хелатор"
                         value={drug}
                         onChange={setDrug}
                         options={chelatorOptions}
                     />
+                    {drug !== 'Нет' && (
+                        <div className="flex items-center justify-between">
+                            <label className="font-medium text-gray-900">Дозировка (мг)</label>
+                            <div className="w-32">
+                                <Input value={chelatorDosage} onChange={(e) => setChelatorDosage(e.target.value)} type="number" placeholder="мг" />
+                            </div>
+                        </div>
+                    )}
                 </Card>
 
                 <Card className="space-y-4">

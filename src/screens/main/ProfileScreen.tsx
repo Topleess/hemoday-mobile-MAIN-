@@ -100,7 +100,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }, [isGuest]);
 
     return (
-        <div className="pb-24">
+        <div className="pb-24 md:pb-8">
             <Header title="Профиль" />
 
             {/* Guest Warning */}

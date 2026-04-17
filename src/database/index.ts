@@ -39,6 +39,41 @@ const adapter = new LokiJSAdapter({
                     }),
                 ],
             },
+            {
+                toVersion: 8,
+                steps: [
+                    addColumns({
+                        table: 'transfusions',
+                        columns: [
+                            { name: 'ferritin', type: 'number', isOptional: true },
+                            { name: 'chelator_dosage', type: 'number', isOptional: true },
+                            { name: 'note', type: 'string', isOptional: true },
+                        ],
+                    }),
+                ],
+            },
+            {
+                toVersion: 9,
+                steps: [
+                    addColumns({
+                        table: 'reminders',
+                        columns: [
+                            { name: 'repeat_end_date', type: 'string', isOptional: true },
+                        ],
+                    }),
+                ],
+            },
+            {
+                toVersion: 10,
+                steps: [
+                    addColumns({
+                        table: 'reminders',
+                        columns: [
+                            { name: 'cancelled_dates', type: 'string', isOptional: true },
+                        ],
+                    }),
+                ],
+            },
         ],
     }),
     // (You might want to comment out the following line for production to persist data to IndexedDB)

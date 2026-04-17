@@ -9,6 +9,8 @@ export default class Reminder extends Model {
     @text('time') time!: string
     @text('repeat') repeat!: string
     @text('note') note?: string
+    @text('repeat_end_date') repeatEndDate?: string
+    @text('cancelled_dates') cancelledDates?: string
     @readonly @date('created_at') createdAt!: number
     @readonly @date('updated_at') updatedAt!: number
 }

@@ -19,6 +19,10 @@ import { MOCK_TRANSFUSIONS, MOCK_ANALYSES, MOCK_REMINDERS } from './data/mockDat
 import AnalysisTemplate from './database/models/AnalysisTemplate';
 import { authService } from './services/auth';
 import { sync } from './database/sync';
+import { notificationService } from './services/notifications';
+import { database } from './database';
+import Reminder from './database/models/Reminder';
+import { trackPageView, trackEvent, AnalyticsEvents } from './services/analytics';
 
 export default function App() {
     return (
@@ -39,6 +43,7 @@ function AppContent() {
     const [notificationsEnabled, setNotificationsEnabled] = useState(false);
     const [editingItem, setEditingItem] = useState<any>(null);
     const [editingTemplate, setEditingTemplate] = useState<AnalysisTemplate | null>(null);
+    const [preselectedDate, setPreselectedDate] = useState<string | null>(null);
 
     // Seed default data on mount and check auth
     useEffect(() => {
@@ -57,9 +62,15 @@ function AppContent() {
         initArgs().catch(console.error);
     }, []);
 
+    // Track screen changes in Yandex Metrika
+    useEffect(() => {
+        trackPageView(currentScreen);
+    }, [currentScreen]);
+
     const handleLogin = async () => {
         setIsLoggedIn(true);
         setCurrentScreen('CALENDAR');
+        trackEvent(AnalyticsEvents.LOGIN);
         try {
             await sync();
         } catch (e) {
@@ -68,6 +79,7 @@ function AppContent() {
     };
 
     const handleLogout = async () => {
+        trackEvent(AnalyticsEvents.LOGOUT);
         setLoading(true);
         try {
             await sync();
@@ -87,16 +99,76 @@ function AppContent() {
         setCurrentScreen('PROFILE');
     };
 
-    const handleNotificationToggle = () => {
-        const newState = !notificationsEnabled;
-        setNotificationsEnabled(newState);
-        if (newState) {
-            showToast({ message: "Уведомления включены", type: 'success' });
+    const handleNotificationToggle = async () => {
+        if (!notificationsEnabled) {
+            // Turning ON
+            if (!notificationService.isSupported()) {
+                showToast({ message: "Уведомления не поддерживаются в этом браузере", type: 'warning' });
+                return;
+            }
+            const granted = await notificationService.requestPermission();
+            if (granted) {
+                setNotificationsEnabled(true);
+                localStorage.setItem('hemoday_notifications', 'true');
+                showToast({ message: "Уведомления включены", type: 'success' });
+                // Schedule today's reminders
+                scheduleRemindersForToday();
+            } else {
+                showToast({ message: "Разрешение на уведомления не получено. Проверьте настройки браузера.", type: 'warning' });
+            }
+        } else {
+            // Turning OFF
+            setNotificationsEnabled(false);
+            localStorage.removeItem('hemoday_notifications');
+            showToast({ message: "Уведомления отключены", type: 'info' });
         }
     };
 
-    const sendTestNotification = () => {
-        showToast({ message: "Тестовое уведомление отправлено!", type: 'info' });
+    const scheduleRemindersForToday = async () => {
+        try {
+            const reminders = await database.get<Reminder>('reminders').query().fetch();
+            const reminderData = reminders.map(r => ({
+                id: r.id,
+                title: r.title,
+                time: r.time,
+                note: r.note,
+                date: r.date,
+                repeat: r.repeat,
+                repeatEndDate: r.repeatEndDate,
+                cancelledDates: r.cancelledDates,
+            }));
+            const count = await notificationService.scheduleReminders(reminderData);
+            if (count > 0) {
+                console.log(`Scheduled ${count} reminders for today`);
+            }
+        } catch (e) {
+            console.error('Failed to schedule reminders:', e);
+        }
+    };
+
+    // Auto-schedule reminders on app load if notifications are enabled
+    useEffect(() => {
+        const savedPref = localStorage.getItem('hemoday_notifications');
+        if (savedPref === 'true' && notificationService.isSupported()) {
+            notificationService.requestPermission().then(granted => {
+                if (granted) {
+                    setNotificationsEnabled(true);
+                    scheduleRemindersForToday();
+                }
+            });
+        }
+    }, []);
+
+    const sendTestNotification = async () => {
+        if (notificationService.getPermission() === 'granted') {
+            await notificationService.showNotification(
+                'HemoDay — Тест',
+                'Уведомления работают! Вы будете получать напоминания вовремя.'
+            );
+            showToast({ message: "Тестовое уведомление отправлено!", type: 'success' });
+        } else {
+            showToast({ message: "Сначала включите уведомления", type: 'warning' });
+        }
     };
 
     const [dataTab, setDataTab] = useState<'transfusions' | 'analyses' | 'reminders' | 'chart'>('transfusions');
@@ -110,16 +182,20 @@ function AppContent() {
         }
     };
 
-    const handleNavigate = (screen: ScreenName) => {
+    const handleNavigate = (screen: ScreenName, options?: { date?: string }) => {
         if (['ADD_TRANSFUSION', 'ADD_ANALYSIS', 'ADD_REMINDER'].includes(screen)) {
             setReturnScreen(currentScreen);
             setEditingItem(null); // CRITICAL: Clear editing state when adding new item
+            setPreselectedDate(options?.date || null);
         }
         setCurrentScreen(screen);
     };
 
-    const handleEditItem = (type: 'transfusion' | 'analysis' | 'reminder', item: any) => {
+    const [viewingDate, setViewingDate] = useState<string | null>(null);
+
+    const handleEditItem = (type: 'transfusion' | 'analysis' | 'reminder', item: any, date?: string) => {
         setEditingItem(item);
+        setViewingDate(date || null);
         setReturnScreen(currentScreen);
         if (type === 'transfusion') setCurrentScreen('ADD_TRANSFUSION');
         else if (type === 'analysis') setCurrentScreen('ADD_ANALYSIS');
@@ -202,15 +278,15 @@ function AppContent() {
                 break;
 
             case 'ADD_TRANSFUSION':
-                content = <AddTransfusionScreen onClose={() => setCurrentScreen(returnScreen)} initialData={editingItem} />;
+                content = <AddTransfusionScreen onClose={() => setCurrentScreen(returnScreen)} initialData={editingItem} preselectedDate={preselectedDate} />;
                 break;
 
             case 'ADD_ANALYSIS':
-                content = <AddAnalysisScreen onClose={() => setCurrentScreen(returnScreen)} initialData={editingItem} />;
+                content = <AddAnalysisScreen onClose={() => setCurrentScreen(returnScreen)} initialData={editingItem} preselectedDate={preselectedDate} />;
                 break;
 
             case 'ADD_REMINDER':
-                content = <AddReminderScreen onClose={() => setCurrentScreen(returnScreen)} initialData={editingItem} />;
+                content = <AddReminderScreen onClose={() => setCurrentScreen(returnScreen)} initialData={editingItem} preselectedDate={preselectedDate} viewingDate={viewingDate} />;
                 break;
 
             case 'ADD_ANALYSIS_TEMPLATE':
@@ -302,19 +378,29 @@ function AppContent() {
     const showBottomNav = isLoggedIn && ['CALENDAR', 'DATA', 'PROFILE'].includes(currentScreen);
 
     return (
-        <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-red-100 max-w-md mx-auto shadow-2xl relative border-x border-gray-200">
+        <div className="min-h-screen bg-white text-gray-900 font-sans selection:bg-red-100">
+            <div className="min-h-screen">
+                {/* Main content area */}
+                <div className="min-h-screen bg-white relative">
+                    <div className="max-w-2xl mx-auto min-h-screen bg-white relative">
+                        <main className="min-h-screen relative overflow-hidden">
+                            <AnimatePresence>
+                                {renderScreen()}
+                            </AnimatePresence>
+                            <AnimatePresence>
+                                {renderOverlays()}
+                            </AnimatePresence>
+                        </main>
+                    </div>
+                </div>
+            </div>
 
-            <main className="min-h-screen relative overflow-hidden">
-                <AnimatePresence>
-                    {renderScreen()}
-                </AnimatePresence>
-                <AnimatePresence>
-                    {renderOverlays()}
-                </AnimatePresence>
-            </main>
-
+            {/* Bottom navigation — all screen sizes */}
             {showBottomNav && (
-                <div className="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-200 flex justify-around items-center py-3 pb-6 z-40">
+                <div
+                    className="fixed bottom-0 w-full bg-white border-t border-gray-200 flex justify-around items-center py-3 pb-6 z-40"
+                    style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 12px)', height: 'auto' }}
+                >
                     <button onClick={() => handleTabChange('CALENDAR')} className={`flex flex-col items-center gap-1 ${currentScreen === 'CALENDAR' ? 'text-red-500' : 'text-gray-400'}`}>
                         <CalendarIcon size={24} />
                         <span className="text-[10px] font-medium">Календарь</span>

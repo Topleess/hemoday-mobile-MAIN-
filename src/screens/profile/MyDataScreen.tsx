@@ -206,7 +206,7 @@ const MyDataScreenComponent: React.FC<MyDataScreenProps> = ({ onBack, onEditTemp
     };
 
     return (
-        <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col animate-in slide-in-from-right duration-300 overflow-y-auto">
+        <div className="fixed inset-0 bg-white z-50 flex flex-col animate-in slide-in-from-right duration-300 overflow-y-auto">
             <Header title="Мои данные" onBack={onBack} />
 
             <div className="p-4 space-y-6 pb-20">

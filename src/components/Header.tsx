@@ -9,7 +9,10 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ title, onBack, rightAction, className = '' }) => (
-    <div className={`flex items-center gap-2 px-4 py-3 bg-[#f3f4f6]/85 backdrop-blur-md sticky top-0 z-30 border-b border-transparent ${className}`}>
+    <div
+        className={`flex items-center gap-2 px-4 py-3 bg-white/90 backdrop-blur-md sticky top-0 z-30 border-b border-gray-100/50 ${className}`}
+        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 12px)', paddingBottom: '12px', height: 'auto' }}
+    >
         {/* Left Side: Back button */}
         <div className="w-16 flex-shrink-0 flex items-center">
             {onBack && (
